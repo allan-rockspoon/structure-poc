@@ -1,6 +1,8 @@
 package com.example.poc.datasource.streaming_realm
 
 import com.example.poc.datasource.streaming_realm.order.OrderEntity
+import com.example.poc.datasource.streaming_realm.order.Item
+import com.example.poc.datasource.streaming_realm.product.ProductEntity
 import com.example.poc.datasource.streaming_realm.user.UserEntity
 import io.realm.kotlin.MutableRealm
 import io.realm.kotlin.Realm
@@ -27,22 +29,34 @@ object RealmDatabase {
 
     private val schema = setOf(
         OrderEntity::class,
-        UserEntity::class
+        OrderEntity.Item::class,
+        OrderEntity.EmbeddedItem::class,
+        ProductEntity::class,
+        UserEntity::class,
     )
 
     suspend fun init() {
         init(Credentials.anonymous())
     }
 
-    suspend fun apiKey(key: String) {
-        init(Credentials.apiKey(key))
+    suspend fun rockspoonApiKey(key: String) {
+        init(Credentials.customFunction(mapOf("rockspoon_api_key" to key)))
     }
 
-    suspend fun login(accessToken: String? = null) {
-        init(accessToken?.let { Credentials.jwt(it) } ?: Credentials.anonymous())
+    suspend fun accessToken(
+        accessToken: String? = null,
+        onTokenExpired: (() -> Unit)? = null
+    ) {
+        init(
+            realmCredentials = accessToken?.let { Credentials.jwt(it) } ?: Credentials.anonymous(),
+            onAccessTokenExpired = onTokenExpired
+        )
     }
 
-    suspend fun init(realmCredentials: Credentials): Realm {
+    suspend fun init(
+        realmCredentials: Credentials,
+        onAccessTokenExpired: (() -> Unit)? = null
+    ): Realm {
         val realmUser = realmApp.login(realmCredentials)
         Timber.tag("RealmDatabase").d("Realm User: %s", realmUser.id)
         val realmConfiguration = SyncConfiguration.Builder(
@@ -50,8 +64,10 @@ object RealmDatabase {
             schema = schema
         )
             .name("realm-poc")
+            .schemaVersion(9)
             .initialSubscriptions { realm ->
                 add(realm.query<OrderEntity>(), updateExisting = true)
+                add(realm.query<ProductEntity>(), updateExisting = true)
             }
             .errorHandler { session, error ->
                 when (error) {
@@ -83,6 +99,10 @@ object RealmDatabase {
                 ) {
                     Timber.i("Client reset: manual reset required")
                     // ... Handle the reset manually here
+                    when (session.state) {
+                        SyncSession.State.WAITING_FOR_ACCESS_TOKEN -> onAccessTokenExpired?.invoke()
+                        else -> {}
+                    }
                 }
                 // Automatic reset failed.
             }) // Set your client reset strategy
