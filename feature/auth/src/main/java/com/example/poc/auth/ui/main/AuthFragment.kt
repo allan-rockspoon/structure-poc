@@ -8,7 +8,6 @@ import com.example.poc.auth.R
 import com.example.poc.auth.databinding.AuthFragmentBinding
 import com.example.poc.auth.domain.SignUpWithPasswordUseCase
 import com.example.poc.auth.loadModules
-import com.example.poc.core.data.user.User
 import com.example.poc.core.ui.common.BindableFragment
 import com.example.poc.core.ui.event.FeatureAuthEvent
 import com.example.poc.core.ui.event.EventViewModel
@@ -39,6 +38,10 @@ class AuthFragment : BindableFragment<AuthFragmentBinding>() {
             viewModel.signUp()
         }
 
+        binding.authPinCodeButton.setOnClickListener {
+            eventViewModel.postEvent(FeatureAuthEvent.OnPinLoginSelected)
+        }
+
         // Observe UI state
         viewModel.uiState.onEach { uiState ->
             when (uiState) {
@@ -57,7 +60,7 @@ class AuthFragment : BindableFragment<AuthFragmentBinding>() {
                 }
                 is UiState.Error -> {
                     updateProgressIndicator(null)
-                    updateErrorMessages(uiState.exception)
+                    updateErrorMessages(uiState.throwable)
                 }
             }
         }.launchIn(viewLifecycleOwner.lifecycleScope)
@@ -119,7 +122,7 @@ class AuthFragment : BindableFragment<AuthFragmentBinding>() {
             }
         }
 
-        data class Success(val item: User) : UiState()
-        data class Error(val exception: Exception) : UiState()
+        object Success : UiState()
+        data class Error(val throwable: Throwable) : UiState()
     }
 }

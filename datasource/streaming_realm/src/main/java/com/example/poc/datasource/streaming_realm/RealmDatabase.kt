@@ -1,6 +1,7 @@
 package com.example.poc.datasource.streaming_realm
 
 import com.example.poc.datasource.streaming_realm.order.OrderEntity
+import com.example.poc.datasource.streaming_realm.product.ProductEntity
 import com.example.poc.datasource.streaming_realm.user.UserEntity
 import io.realm.kotlin.MutableRealm
 import io.realm.kotlin.Realm
@@ -8,11 +9,22 @@ import io.realm.kotlin.TypedRealm
 import io.realm.kotlin.ext.query
 import io.realm.kotlin.mongodb.App
 import io.realm.kotlin.mongodb.Credentials
+import io.realm.kotlin.mongodb.LoggedOut
 import io.realm.kotlin.mongodb.exceptions.ClientResetRequiredException
 import io.realm.kotlin.mongodb.exceptions.UnrecoverableSyncException
 import io.realm.kotlin.mongodb.sync.RecoverOrDiscardUnsyncedChangesStrategy
 import io.realm.kotlin.mongodb.sync.SyncConfiguration
 import io.realm.kotlin.mongodb.sync.SyncSession
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.forEach
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import timber.log.Timber
 
 /**
@@ -23,26 +35,57 @@ object RealmDatabase {
     @Volatile
     lateinit var instance: Realm
 
-    private val realmApp = App.create("realmpoc-qvjdf")
+    val realmApp = App.create("realmpoc-qvjdf")
 
     private val schema = setOf(
         OrderEntity::class,
-        UserEntity::class
+        UserEntity::class,
+        OrderEntity.Item::class,
+        ProductEntity::class,
+        OrderEntity.EmbeddedItem::class,
     )
 
     suspend fun init() {
         init(Credentials.anonymous())
     }
 
-    suspend fun apiKey(key: String) {
-        init(Credentials.apiKey(key))
+    suspend fun rockspoonApiKey(key: String) {
+        init(Credentials.customFunction(mapOf("api_key" to key)))
     }
 
-    suspend fun login(accessToken: String? = null) {
-        init(accessToken?.let { Credentials.jwt(it) } ?: Credentials.anonymous())
+    suspend fun accessToken(
+        accessToken: String? = null,
+        onTokenExpired: (() -> Unit)? = null
+    ) {
+        init(
+            realmCredentials = accessToken?.let { Credentials.jwt(it) } ?: Credentials.anonymous(),
+            onAccessTokenExpired = onTokenExpired
+        )
     }
 
-    suspend fun init(realmCredentials: Credentials): Realm {
+    suspend fun apiKey(apiKey: String) {
+        init(realmCredentials = Credentials.apiKey(apiKey))
+    }
+
+    suspend fun logout() {
+        withTimeout(2000) {
+            realmApp.currentUser?.logOut()
+            while (realmApp.currentUser != null) {
+                delay(500)
+            }
+            //TODO by Oleg. This code doesn't work to wait until user is really logged out
+           /* realmApp.authenticationChangeAsFlow()
+                .onStart { realmApp.currentUser?.logOut() }
+                .onEach { Timber.tag("RealmDatabase").i("new authentication status is $it") }
+                .filter { it is LoggedOut }
+                .first()*/
+        }
+    }
+
+    suspend fun init(
+        realmCredentials: Credentials,
+        onAccessTokenExpired: (() -> Unit)? = null
+    ): Realm {
         val realmUser = realmApp.login(realmCredentials)
         Timber.tag("RealmDatabase").d("Realm User: %s", realmUser.id)
         val realmConfiguration = SyncConfiguration.Builder(
@@ -50,8 +93,10 @@ object RealmDatabase {
             schema = schema
         )
             .name("realm-poc")
+            .schemaVersion(8)
             .initialSubscriptions { realm ->
                 add(realm.query<OrderEntity>(), updateExisting = true)
+                add(realm.query<ProductEntity>(), updateExisting = true)
             }
             .errorHandler { session, error ->
                 when (error) {
@@ -83,6 +128,10 @@ object RealmDatabase {
                 ) {
                     Timber.i("Client reset: manual reset required")
                     // ... Handle the reset manually here
+                    when (session.state) {
+                        SyncSession.State.WAITING_FOR_ACCESS_TOKEN -> onAccessTokenExpired?.invoke()
+                        else -> {}
+                    }
                 }
                 // Automatic reset failed.
             }) // Set your client reset strategy

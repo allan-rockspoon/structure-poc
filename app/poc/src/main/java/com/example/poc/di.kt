@@ -1,7 +1,6 @@
 package com.example.poc
 
 import com.example.poc.core.common.di.NetworkQualifiers
-import com.example.poc.core.data.BuildConfig
 import com.example.poc.core.data.common.DataSourcesConfig
 import com.example.poc.ui.main.AppPocEventDelegate
 import com.example.poc.ui.main.AppPocEventDelegateImpl
@@ -62,4 +61,5 @@ fun appPocModule() = module {
     factoryOf<FeatureSettingsEventDelegate>(::FeatureSettingsEventDelegateImpl)
 
     viewModelOf(::MainViewModel)
+
 }

@@ -2,6 +2,7 @@ package com.example.poc.core.data.order
 
 import com.example.poc.datasource.streaming_realm.order.OrderEntity
 import io.realm.kotlin.Realm
+import io.realm.kotlin.UpdatePolicy
 import io.realm.kotlin.ext.toRealmList
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -27,10 +28,17 @@ internal class OrderRealmDataSourceImpl(
         model: Order
     ): Order {
         val entity = model.toEntity()
-        val result = database.writeBlocking {
-            copyToRealm(entity)
+        val result = database.write {
+            copyToRealm(entity, updatePolicy = UpdatePolicy.ALL)
         }
         return result.toModel()
+    }
+
+    suspend fun deleteOrder(id: String) {
+        return database.write {
+            val order = database.query(OrderEntity::class, "_id == $0", ObjectId(id)).first()
+            delete(order)
+        }
     }
 
     private fun OrderEntity.toModel() = Order(
@@ -38,7 +46,7 @@ internal class OrderRealmDataSourceImpl(
         name = name ?: "",
         items = items.map {
             Order.Item(
-                productId = it.productId.asNumber().longValue(),
+                productId = it.productId.timestamp.toLong(),
                 quantity = it.quantity
             )
         }
